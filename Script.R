@@ -9,9 +9,11 @@
 # Libraries
 library(tidyverse)
 library(codebook)
+library(apaTables)
 
 # Data
 data <- read.csv("InsNova_train.csv")
+attach(data)
 
 # CLEANING ====
 # > Make sure variable types are correct ----
@@ -43,3 +45,23 @@ val_labels(data$dr_age) <- c("Young" = 1,
 
 val_labels(data$claim_ind) <- c("No" = 0,
                                 "Yes" = 1)
+
+# BASIC DESCRIPTIVES ====
+summary(data)
+
+# > Bivariate correlations ----
+data %>% select(veh_value, exposure, veh_age, dr_age, claim_ind, claim_count, claim_cost) %>% 
+  apa.cor.table(file = "bivariate corr.doc")
+
+# > Individual regression for cost ----
+## gender
+modGen <- lm(claim_cost ~ gender)
+summary(modGen)
+
+## vehicle body
+modBod <- lm(claim_cost ~ veh_body)
+summary(modBod)
+
+## vehical area 
+modArea <- lm(claim_cost ~ area)
+summary(modArea)

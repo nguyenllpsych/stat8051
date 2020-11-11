@@ -1,0 +1,69 @@
+---
+title: "STAT 8051 Project Codebook"
+author: "Group 4"
+date: "11/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE, # show warnings during codebook generation
+  message = FALSE, # show messages during codebook generation
+  error = FALSE, # do not interrupt codebook generation in case of errors,
+                # usually better for debugging
+  echo = FALSE  # show R code
+)
+ggplot2::theme_set(ggplot2::theme_bw())
+pander::panderOptions("table.split.table", Inf)
+options(max.print = 10000)
+```
+
+```{r cleaning code, include = FALSE}
+# META ====
+# Libraries
+library(tidyverse)
+library(codebook)
+
+# Data
+data <- read.csv("InsNova_train.csv")
+
+# CLEANING ====
+# > Make sure variable types are correct ----
+names <- c("id", "veh_body", "gender", "area")
+data[,names] <- 
+  lapply(data[,names], as.factor)
+
+rm(names)
+
+# > Variable lables ----
+var_label(data$id) <- "Policy key"
+var_label(data$veh_value) <- "Market value of the vehicle in $10,000’s"
+var_label(data$veh_body) <- "Type of vehicles"
+var_label(data$veh_age) <- "Age of vehicles"
+var_label(data$gender) <- "Gender of driver"
+var_label(data$area) <- "Driving area of residence"
+var_label(data$dr_age) <- "Driver’s age category"
+var_label(data$exposure) <- "The basic unit of risk underlying an insurance premium"
+var_label(data$claim_ind) <- "Indicator of claim"
+var_label(data$claim_count) <- "The number of claims"
+var_label(data$claim_cost) <- "Claim amount"
+
+# > Value labels ----
+val_labels(data$veh_age) <- c("Youngest" = 1,
+                              "Oldest" = 4)
+
+val_labels(data$dr_age) <- c("Young" = 1,
+                             "Old" = 6)
+
+val_labels(data$claim_ind) <- c("No" = 0,
+                                "Yes" = 1)
+```
+
+```{r codebook}
+codebook_data <- data %>% 
+  select(-id) #excluding ID in codebook
+metadata(codebook_data)$name <- "STAT 8051 Kaggle Competition Codebook - Group 4"
+metadata(codebook_data)$description <- "Basic summary statistics and codebook, excluding ID variable, for the training dataset from the 2020 Travelers Modeling Competition - Predicting Claim Cost"
+metadata(codebook_data)$creator <- "Linh Nguyen"
+codebook(codebook_data)
+```

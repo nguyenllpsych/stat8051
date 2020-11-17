@@ -2,49 +2,27 @@
 ##          STAT 8051 Kaggle Project           ##
 ##           Linh Nguyen - Group 4             ##
 ##           Created: 10-Nov-2020              ##
-##         Last updated: 10-Nov-2020           ##
+##         Last updated: 16-Nov-2020           ##
 #################################################
 
 # META ====
-# Libraries
+# > Libraries ----
 library(tidyverse)
 library(codebook)
 library(apaTables)
+library(caret)
+library(faraway)
+library(ggplot2)
+library(glmnet)
+library(EnvStats) #for boxcox
+library(cplm) #for tweedie 
+set.seed(8051)
 
-# Data
+# > Data ----
 data <- read.csv("InsNova_train.csv")
 attach(data)
 
-# CLEANING ====
-# > Make sure variable types are correct ----
-names <- c("id", "veh_body", "gender", "area")
-data[,names] <- 
-  lapply(data[,names], as.factor)
-
-rm(names)
-
-# > Variable lables ----
-var_label(data$id) <- "Policy key"
-var_label(data$veh_value) <- "Market value of the vehicle in $10,000's"
-var_label(data$veh_body) <- "Type of vehicles"
-var_label(data$veh_age) <- "Age of vehicles"
-var_label(data$gender) <- "Gender of driver"
-var_label(data$area) <- "Driving area of residence"
-var_label(data$dr_age) <- "Driver's age category"
-var_label(data$exposure) <- "The basic unit of risk underlying an insurance premium"
-var_label(data$claim_ind) <- "Indicator of claim"
-var_label(data$claim_count) <- "The number of claims"
-var_label(data$claim_cost) <- "Claim amount"
-
-# > Value labels ----
-val_labels(data$veh_age) <- c("Youngest" = 1,
-                              "Oldest" = 4)
-
-val_labels(data$dr_age) <- c("Young" = 1,
-                             "Old" = 6)
-
-val_labels(data$claim_ind) <- c("No" = 0,
-                                "Yes" = 1)
+test <- read.csv("InsNova_test.csv")
 
 # BASIC DESCRIPTIVES ====
 summary(data)
@@ -65,3 +43,60 @@ summary(modBod)
 ## vehical area 
 modArea <- lm(claim_cost ~ area)
 summary(modArea)
+
+# MODEL FITTING ====
+# > Split data for cross-validation ----
+control <- trainControl(method = "cv", number = 10)
+model <- train(claim_cost ~., data = data, method = "lm",
+               trControl = control)
+
+training <- data$claim_cost %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train <- data[training,]
+test <- data[-training,]
+rm(training)
+
+
+# > Predict claim_ind ----
+ind <- data %>% select(-claim_cost, -claim_count, -id)
+
+ggplot(data, 
+       aes(x = claim_ind)) + 
+  geom_histogram(position = "dodge", binwidth = 1)
+
+mInd <- glm(claim_ind ~., family = binomial, data = ind)
+summary(mInd)
+
+predInd <- predict(mInd, type = "response")
+data <- cbind(data, predInd)
+
+mInd <- train(as.factor(claim_ind) ~., data = ind, method = "glm",
+                trControl = control)
+print(mInd)
+summary(mInd)
+
+# > Predict claim_count ----
+count <- data %>% select(-claim_cost, -claim_ind, -id)
+
+countTrain <- train %>% select(-claim_cost, -claim_ind, -id)
+
+## Poisson regression
+mCount <- train(claim_count ~., method = "glm", family = "poisson", data = count, 
+                trControl = control)
+print(mCount)
+
+test$claim_count <- predict(mCount, test)
+summary(test$claim_count)
+
+## Tweedie model -> good performance
+mCount <- cpglm(claim_count ~., link = "log", data = countTrain)
+summary(mCount)
+predictions <- mCount %>% predict(test)
+data.frame( R2 = R2(predictions, test$claim_count),
+            RMSE = RMSE(predictions, test$claim_count),
+            MAE = MAE(predictions, test$claim_count))
+
+# > Predict claim_cost ----
+cost <- data %>% select(-claim_ind, -id)
+
+mCost <- glm(claim_cost ~., data = cost, offset = log(claim_count), family = "Gamma"(link = "log"))

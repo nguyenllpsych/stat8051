@@ -2,7 +2,7 @@
 ##          STAT 8051 Kaggle Project           ##
 ##           Linh Nguyen - Group 4             ##
 ##           Created: 10-Nov-2020              ##
-##         Last updated: 16-Nov-2020           ##
+##         Last updated: 17-Nov-2020           ##
 #################################################
 
 # META ====
@@ -13,16 +13,21 @@ library(apaTables)
 library(caret)
 library(faraway)
 library(ggplot2)
-library(glmnet)
+library(glmnet) #for lasso
 library(EnvStats) #for boxcox
 library(cplm) #for tweedie 
+library(logistf) #for firth
 set.seed(8051)
+options(scipen = 999)
 
 # > Data ----
 data <- read.csv("InsNova_train.csv")
+data$veh_body <- as.factor(data$veh_body)
+data$gender <- as.factor(data$gender)
+data$area <- as.factor(data$area)
 attach(data)
 
-test <- read.csv("InsNova_test.csv")
+submit <- read.csv("InsNova_test.csv")
 
 # BASIC DESCRIPTIVES ====
 summary(data)
@@ -44,11 +49,13 @@ summary(modBod)
 modArea <- lm(claim_cost ~ area)
 summary(modArea)
 
+## count and indicator
+modCount <- lm(claim_cost ~ claim_count + claim_ind)
+summary(modCount)
+
 # MODEL FITTING ====
 # > Split data for cross-validation ----
 control <- trainControl(method = "cv", number = 10)
-model <- train(claim_cost ~., data = data, method = "lm",
-               trControl = control)
 
 training <- data$claim_cost %>% 
   createDataPartition(p = 0.8, list = FALSE)
@@ -60,43 +67,133 @@ rm(training)
 # > Predict claim_ind ----
 ind <- data %>% select(-claim_cost, -claim_count, -id)
 
-ggplot(data, 
-       aes(x = claim_ind)) + 
-  geom_histogram(position = "dodge", binwidth = 1)
+indTrain <- train %>% select(-claim_cost, -claim_count, -id)
+indTest <- test %>% select(-claim_cost, -claim_count, -id)
 
-mInd <- glm(claim_ind ~., family = binomial, data = ind)
+# >> logistic regression ----
+##mInd <- glm(claim_ind ~., family = binomial, data = indTrain)
+##summary(mInd)
+##
+##predictions <- mInd %>% predict(test)
+##data.frame( R2 = R2(predictions, test$claim_ind),
+##            RMSE = RMSE(predictions, test$claim_ind),
+##            MAE = MAE(predictions, test$claim_ind))
+
+# > Firth logistic regression -> better performance, but not great ----
+mInd <- logistf(claim_ind ~., data = indTrain)
 summary(mInd)
 
-predInd <- predict(mInd, type = "response")
-data <- cbind(data, predInd)
+mIndCoef <- mInd$coefficients[-1]
 
-mInd <- train(as.factor(claim_ind) ~., data = ind, method = "glm",
-                trControl = control)
-print(mInd)
-summary(mInd)
+indTest <- indTest %>% mutate(
+  veh_body_coef = ifelse(veh_body == "BUS", 0,
+                     ifelse(veh_body == "CONVT" , mIndCoef[[3]],
+                        ifelse(veh_body == "COUPE" , mIndCoef[[4]],
+                           ifelse(veh_body == "HBACK" , mIndCoef[[5]],
+                              ifelse(veh_body == "HDTOP" , mIndCoef[[6]],
+                                 ifelse(veh_body == "MCARA" , mIndCoef[[7]],
+                                    ifelse(veh_body == "MIBUS" , mIndCoef[[8]],
+                                       ifelse(veh_body == "PANVN" , mIndCoef[[9]],
+                                          ifelse(veh_body == "RDSTR" , mIndCoef[[10]],
+                                             ifelse(veh_body == "SEDAN" , mIndCoef[[11]],
+                                                ifelse(veh_body == "STNWG" , mIndCoef[[12]],
+                                                   ifelse(veh_body == "TRUCK" , mIndCoef[[13]],
+                                                      ifelse(veh_body == "UTE" , mIndCoef[[14]], 
+                                                         NA))))))))))))))
+indTest <- indTest %>% mutate(
+  area_coef = ifelse(area == "A", 0,
+                     ifelse(area == "B", mIndCoef[[17]],
+                            ifelse(area == "C", mIndCoef[[18]],
+                                   ifelse(area == "D", mIndCoef[[19]],
+                                          ifelse(area == "E", mIndCoef[[20]],
+                                                 ifelse(area == "F", mIndCoef[[21]],
+                                                        NA)))))))
+
+indTest <- indTest %>% mutate(
+  gender_coef = ifelse(gender == "F", 0, mIndCoef[[16]]))
+
+indTest <- indTest %>% mutate(
+  indPred = mIndCoef[[1]] * veh_value + mIndCoef[[2]] * exposure + 
+    veh_body_coef + veh_age * mIndCoef[[15]] + gender_coef + area_coef + dr_age * mIndCoef[[22]])
+
+data.frame( R2 = R2(indTest$indPred, indTest$claim_ind),
+            RMSE = RMSE(indTest$indPred, indTest$claim_ind),
+            NRMSE = RMSE(indTest$indPred, indTest$claim_ind)/(max(indTest$claim_ind) - min(indTest$claim_ind)),
+            MAE = MAE(indTest$indPred, indTest$claim_ind))
 
 # > Predict claim_count ----
 count <- data %>% select(-claim_cost, -claim_ind, -id)
 
 countTrain <- train %>% select(-claim_cost, -claim_ind, -id)
 
-## Poisson regression
-mCount <- train(claim_count ~., method = "glm", family = "poisson", data = count, 
-                trControl = control)
-print(mCount)
+# >> Poisson regression ----
+##mCount <- train(claim_count ~., method = "glm", family = "poisson", data = count, 
+##                trControl = control)
+##print(mCount)
+##
+##predictions <- mCount %>% predict(test)
+##data.frame( R2 = R2(predictions, test$claim_count),
+##            RMSE = RMSE(predictions, test$claim_count),
+##            MAE = MAE(predictions, test$claim_count))
 
-test$claim_count <- predict(mCount, test)
-summary(test$claim_count)
 
-## Tweedie model -> good performance
+# >> Tweedie model -> good performance ----
 mCount <- cpglm(claim_count ~., link = "log", data = countTrain)
 summary(mCount)
+
 predictions <- mCount %>% predict(test)
 data.frame( R2 = R2(predictions, test$claim_count),
             RMSE = RMSE(predictions, test$claim_count),
+            NRMSE = RMSE(predictions, test$claim_count)/(max(test$claim_count)-min(test$claim_count)),
             MAE = MAE(predictions, test$claim_count))
 
 # > Predict claim_cost ----
-cost <- data %>% select(-claim_ind, -id)
 
-mCost <- glm(claim_cost ~., data = cost, offset = log(claim_count), family = "Gamma"(link = "log"))
+# >> Tweedie model ----
+mCost <- cpglm(claim_cost ~., link = "log", data = train)
+summary(mCost)
+
+predictions <- mCost %>% predict(test)
+data.frame( R2 = R2(predictions, test$claim_cost),
+            RMSE = RMSE(predictions, test$claim_cost),
+            NRMSE = RMSE(predictions, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
+            MAE = MAE(predictions, test$claim_cost))
+
+# > Predict in submission dataset ----
+# >> Predict count and ind ----
+submit$claim_count <- mCount %>% predict(submit)
+submit <- submit %>% mutate(
+  veh_body_coef = ifelse(veh_body == "BUS", 0,
+                     ifelse(veh_body == "CONVT" , mIndCoef[[3]],
+                        ifelse(veh_body == "COUPE" , mIndCoef[[4]],
+                           ifelse(veh_body == "HBACK" , mIndCoef[[5]],
+                              ifelse(veh_body == "HDTOP" , mIndCoef[[6]],
+                                 ifelse(veh_body == "MCARA" , mIndCoef[[7]],
+                                    ifelse(veh_body == "MIBUS" , mIndCoef[[8]],
+                                       ifelse(veh_body == "PANVN" , mIndCoef[[9]],
+                                          ifelse(veh_body == "RDSTR" , mIndCoef[[10]],
+                                             ifelse(veh_body == "SEDAN" , mIndCoef[[11]],
+                                                ifelse(veh_body == "STNWG" , mIndCoef[[12]],
+                                                   ifelse(veh_body == "TRUCK" , mIndCoef[[13]],
+                                                      ifelse(veh_body == "UTE" , mIndCoef[[14]], 
+                                                         NA))))))))))))))
+submit <- submit %>% mutate(
+  area_coef = ifelse(area == "A", 0,
+                     ifelse(area == "B", mIndCoef[[17]],
+                            ifelse(area == "C", mIndCoef[[18]],
+                                   ifelse(area == "D", mIndCoef[[19]],
+                                          ifelse(area == "E", mIndCoef[[20]],
+                                                 ifelse(area == "F", mIndCoef[[21]],
+                                                        NA)))))))
+
+submit <- submit %>% mutate(
+  gender_coef = ifelse(gender == "F", 0, mIndCoef[[16]]))
+
+submit <- submit %>% mutate(
+  claim_ind = mIndCoef[[1]] * veh_value + mIndCoef[[2]] * exposure + 
+    veh_body_coef + veh_age * mIndCoef[[15]] + gender_coef + area_coef + dr_age * mIndCoef[[22]])
+
+# >> Predict cost ----
+submit$claim_cost <- mCost %>% predict(submit)
+submit <- submit %>% select(claim_cost)
+write.csv(submit, "submit.csv")

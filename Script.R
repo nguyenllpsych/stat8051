@@ -2,7 +2,7 @@
 ##          STAT 8051 Kaggle Project           ##
 ##           Linh Nguyen - Group 4             ##
 ##           Created: 10-Nov-2020              ##
-##         Last updated: 17-Nov-2020           ##
+##         Last updated: 22-Nov-2020           ##
 #################################################
 
 # META ====
@@ -79,9 +79,21 @@ indTest <- test %>% select(-claim_cost, -claim_count, -id)
 ##            RMSE = RMSE(predictions, test$claim_ind),
 ##            MAE = MAE(predictions, test$claim_ind))
 
-# > Firth logistic regression -> better performance, but not great ----
+# >> outliers ----
+##cooksd <- cooks.distance(mInd)
+##plot(cooksd, pch="*", cex=2, main="Influential Obs by Cooks distance")  # plot cook's distance
+##abline(h = 4*mean(cooksd, na.rm=T), col="red")  # add cutoff line
+##text(x=1:length(cooksd)+1, y=cooksd, labels=ifelse(cooksd>4*mean(cooksd, na.rm=T),names(cooksd),""), col="red")  # add ##labels
+##
+##influential <- as.numeric(names(cooksd)[(cooksd > 4*mean(cooksd, na.rm=T))])
+##head(train[influential, ])  # influential observations
+
+# >> Firth logistic regression -> better performance, but not great ----
 mInd <- logistf(claim_ind ~., data = indTrain)
 summary(mInd)
+
+predict(mInd, newdata=test, type="response")
+
 
 mIndCoef <- mInd$coefficients[-1]
 
@@ -113,8 +125,8 @@ indTest <- indTest %>% mutate(
   gender_coef = ifelse(gender == "F", 0, mIndCoef[[16]]))
 
 indTest <- indTest %>% mutate(
-  indPred = mIndCoef[[1]] * veh_value + mIndCoef[[2]] * exposure + 
-    veh_body_coef + veh_age * mIndCoef[[15]] + gender_coef + area_coef + dr_age * mIndCoef[[22]])
+  indPred = faraway::ilogit(mIndCoef[[1]] * veh_value + mIndCoef[[2]] * exposure + 
+    veh_body_coef + veh_age * mIndCoef[[15]] + gender_coef + area_coef + dr_age * mIndCoef[[22]]))
 
 data.frame( R2 = R2(indTest$indPred, indTest$claim_ind),
             RMSE = RMSE(indTest$indPred, indTest$claim_ind),
@@ -122,9 +134,9 @@ data.frame( R2 = R2(indTest$indPred, indTest$claim_ind),
             MAE = MAE(indTest$indPred, indTest$claim_ind))
 
 # > Predict claim_count ----
-count <- data %>% select(-claim_cost, -claim_ind, -id)
+count <- data %>% select(-claim_cost, -id)
 
-countTrain <- train %>% select(-claim_cost, -claim_ind, -id)
+countTrain <- train %>% select(-claim_cost, -id)
 
 # >> Poisson regression ----
 ##mCount <- train(claim_count ~., method = "glm", family = "poisson", data = count, 
@@ -137,9 +149,16 @@ countTrain <- train %>% select(-claim_cost, -claim_ind, -id)
 ##            MAE = MAE(predictions, test$claim_count))
 
 
-# >> Tweedie model -> good performance ----
+# >> Tweedie model -> better performance ----
 mCount <- cpglm(claim_count ~., link = "log", data = countTrain)
 summary(mCount)
+
+predictions <- mCount %>% predict(countTrain)
+data.frame( R2 = R2(predictions, countTrain$claim_count),
+            RMSE = RMSE(predictions, countTrain$claim_count),
+            NRMSE = RMSE(predictions, countTrain$claim_count)/(max(test$claim_count)-min(test$claim_count)),
+            MAE = MAE(predictions, countTrain$claim_count))
+
 
 predictions <- mCount %>% predict(test)
 data.frame( R2 = R2(predictions, test$claim_count),
@@ -153,15 +172,20 @@ data.frame( R2 = R2(predictions, test$claim_count),
 mCost <- cpglm(claim_cost ~., link = "log", data = train)
 summary(mCost)
 
+predictions <- mCost %>% predict(train)
+data.frame( R2 = R2(predictions, train$claim_cost),
+            RMSE = RMSE(predictions, train$claim_cost),
+            NRMSE = RMSE(predictions, train$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
+            MAE = MAE(predictions, train$claim_cost))
+
 predictions <- mCost %>% predict(test)
 data.frame( R2 = R2(predictions, test$claim_cost),
             RMSE = RMSE(predictions, test$claim_cost),
             NRMSE = RMSE(predictions, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
             MAE = MAE(predictions, test$claim_cost))
 
-# > Predict in submission dataset ----
-# >> Predict count and ind ----
-submit$claim_count <- mCount %>% predict(submit)
+# SUBMISSION ----
+# > Predict count and ind ----
 submit <- submit %>% mutate(
   veh_body_coef = ifelse(veh_body == "BUS", 0,
                      ifelse(veh_body == "CONVT" , mIndCoef[[3]],
@@ -190,10 +214,14 @@ submit <- submit %>% mutate(
   gender_coef = ifelse(gender == "F", 0, mIndCoef[[16]]))
 
 submit <- submit %>% mutate(
-  claim_ind = mIndCoef[[1]] * veh_value + mIndCoef[[2]] * exposure + 
-    veh_body_coef + veh_age * mIndCoef[[15]] + gender_coef + area_coef + dr_age * mIndCoef[[22]])
+  claim_ind = faraway::ilogit(mIndCoef[[1]] * veh_value + mIndCoef[[2]] * exposure + 
+    veh_body_coef + veh_age * mIndCoef[[15]] + gender_coef + area_coef + dr_age * mIndCoef[[22]]))
 
-# >> Predict cost ----
+submit$claim_count <- mCount %>% predict(submit)
+
+# > Predict cost ----
 submit$claim_cost <- mCost %>% predict(submit)
 submit <- submit %>% select(claim_cost)
+
+# export
 write.csv(submit, "submit.csv")

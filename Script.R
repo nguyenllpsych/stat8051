@@ -2,7 +2,7 @@
 ##          STAT 8051 Kaggle Project           ##
 ##           Linh Nguyen - Group 4             ##
 ##           Created: 10-Nov-2020              ##
-##         Last updated: 22-Nov-2020           ##
+##         Last updated: 23-Nov-2020           ##
 #################################################
 
 # META ====
@@ -63,7 +63,6 @@ train <- data[training,]
 test <- data[-training,]
 rm(training)
 
-
 # > Predict claim_ind ----
 ind <- data %>% select(-claim_cost, -claim_count, -id)
 
@@ -92,12 +91,10 @@ indTest <- test %>% select(-claim_cost, -claim_count, -id)
 mInd <- logistf(claim_ind ~., data = indTrain)
 summary(mInd)
 
-predict(mInd, newdata=test, type="response")
-
-
 mIndCoef <- mInd$coefficients[-1]
 
-indTest <- indTest %>% mutate(
+indpred <- function(newdata){
+  newdata <- newdata %>% mutate(
   veh_body_coef = ifelse(veh_body == "BUS", 0,
                      ifelse(veh_body == "CONVT" , mIndCoef[[3]],
                         ifelse(veh_body == "COUPE" , mIndCoef[[4]],
@@ -112,7 +109,7 @@ indTest <- indTest %>% mutate(
                                                    ifelse(veh_body == "TRUCK" , mIndCoef[[13]],
                                                       ifelse(veh_body == "UTE" , mIndCoef[[14]], 
                                                          NA))))))))))))))
-indTest <- indTest %>% mutate(
+newdata <- newdata %>% mutate(
   area_coef = ifelse(area == "A", 0,
                      ifelse(area == "B", mIndCoef[[17]],
                             ifelse(area == "C", mIndCoef[[18]],
@@ -121,13 +118,23 @@ indTest <- indTest %>% mutate(
                                                  ifelse(area == "F", mIndCoef[[21]],
                                                         NA)))))))
 
-indTest <- indTest %>% mutate(
+newdata <- newdata %>% mutate(
   gender_coef = ifelse(gender == "F", 0, mIndCoef[[16]]))
 
-indTest <- indTest %>% mutate(
+newdata <- newdata %>% mutate(
   indPred = faraway::ilogit(mIndCoef[[1]] * veh_value + mIndCoef[[2]] * exposure + 
     veh_body_coef + veh_age * mIndCoef[[15]] + gender_coef + area_coef + dr_age * mIndCoef[[22]]))
 
+newdata %>% select(-veh_body_coef, -area_coef, -gender_coef)
+} #function to compute predicted values
+
+indTrain <- indpred(indTrain)
+data.frame( R2 = R2(indTrain$indPred, indTrain$claim_ind),
+            RMSE = RMSE(indTrain$indPred, indTrain$claim_ind),
+            NRMSE = RMSE(indTrain$indPred, indTrain$claim_ind)/(max(indTrain$claim_ind) - min(indTrain$claim_ind)),
+            MAE = MAE(indTrain$indPred, indTrain$claim_ind))
+
+indTest <- indpred(indTest)
 data.frame( R2 = R2(indTest$indPred, indTest$claim_ind),
             RMSE = RMSE(indTest$indPred, indTest$claim_ind),
             NRMSE = RMSE(indTest$indPred, indTest$claim_ind)/(max(indTest$claim_ind) - min(indTest$claim_ind)),
@@ -186,37 +193,8 @@ data.frame( R2 = R2(predictions, test$claim_cost),
 
 # SUBMISSION ----
 # > Predict count and ind ----
-submit <- submit %>% mutate(
-  veh_body_coef = ifelse(veh_body == "BUS", 0,
-                     ifelse(veh_body == "CONVT" , mIndCoef[[3]],
-                        ifelse(veh_body == "COUPE" , mIndCoef[[4]],
-                           ifelse(veh_body == "HBACK" , mIndCoef[[5]],
-                              ifelse(veh_body == "HDTOP" , mIndCoef[[6]],
-                                 ifelse(veh_body == "MCARA" , mIndCoef[[7]],
-                                    ifelse(veh_body == "MIBUS" , mIndCoef[[8]],
-                                       ifelse(veh_body == "PANVN" , mIndCoef[[9]],
-                                          ifelse(veh_body == "RDSTR" , mIndCoef[[10]],
-                                             ifelse(veh_body == "SEDAN" , mIndCoef[[11]],
-                                                ifelse(veh_body == "STNWG" , mIndCoef[[12]],
-                                                   ifelse(veh_body == "TRUCK" , mIndCoef[[13]],
-                                                      ifelse(veh_body == "UTE" , mIndCoef[[14]], 
-                                                         NA))))))))))))))
-submit <- submit %>% mutate(
-  area_coef = ifelse(area == "A", 0,
-                     ifelse(area == "B", mIndCoef[[17]],
-                            ifelse(area == "C", mIndCoef[[18]],
-                                   ifelse(area == "D", mIndCoef[[19]],
-                                          ifelse(area == "E", mIndCoef[[20]],
-                                                 ifelse(area == "F", mIndCoef[[21]],
-                                                        NA)))))))
-
-submit <- submit %>% mutate(
-  gender_coef = ifelse(gender == "F", 0, mIndCoef[[16]]))
-
-submit <- submit %>% mutate(
-  claim_ind = faraway::ilogit(mIndCoef[[1]] * veh_value + mIndCoef[[2]] * exposure + 
-    veh_body_coef + veh_age * mIndCoef[[15]] + gender_coef + area_coef + dr_age * mIndCoef[[22]]))
-
+submit <- indpred(submit)
+names(submit)[names(submit) == "indPred"] <- "claim_ind"
 submit$claim_count <- mCount %>% predict(submit)
 
 # > Predict cost ----

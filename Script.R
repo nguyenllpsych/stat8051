@@ -17,6 +17,7 @@ library(glmnet) #for lasso
 library(EnvStats) #for boxcox
 library(cplm) #for tweedie 
 library(logistf) #for firth
+library(flexmix) #for poisson mixture model
 set.seed(8051)
 options(scipen = 999)
 
@@ -25,9 +26,18 @@ data <- read.csv("InsNova_train.csv")
 data$veh_body <- as.factor(data$veh_body)
 data$gender <- as.factor(data$gender)
 data$area <- as.factor(data$area)
-attach(data)
 
 submit <- read.csv("InsNova_test.csv")
+submit <- submit %>% select(-id)
+
+# > Split data for cross-validation ----
+training <- data$claim_cost %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train <- data[training,]
+test <- data[-training,]
+rm(training)
+
+attach(train)
 
 # BASIC DESCRIPTIVES ====
 summary(data)
@@ -35,6 +45,7 @@ summary(data)
 # > Bivariate correlations ----
 data %>% select(veh_value, exposure, veh_age, dr_age, claim_ind, claim_count, claim_cost) %>% 
   apa.cor.table(file = "bivariate corr.doc")
+
 
 # > Individual regression for cost ----
 ## gender
@@ -45,27 +56,43 @@ summary(modGen)
 modBod <- lm(claim_cost ~ veh_body)
 summary(modBod)
 
-## vehical area 
+## area 
 modArea <- lm(claim_cost ~ area)
 summary(modArea)
+
+## value
+modVal <- lm(claim_cost ~ veh_value)
+summary(modVal)
+
+## exposure
+modExp <- lm(claim_cost ~ exposure)
+summary(modExp)
+
+## vehicle age
+modVage <- lm(claim_cost ~ veh_age)
+summary(modVage)
+
+## driver age
+modDrage <- lm(claim_cost ~ dr_age)
+summary(modDrage)
+
+## interactions
+modInt <- lm(claim_cost ~ (veh_value+exposure+veh_body+veh_age+gender+area+dr_age)^2)
+drop1(modInt, test = "Chisq")
+
+modInt2 <- lm(claim_count ~ (veh_value+exposure+veh_body+veh_age+gender+area+dr_age)^2)
+drop1(modInt2, test = "Chisq")
+
+modInt3 <- glm(claim_ind ~ (veh_value+exposure+veh_body+veh_age+gender+area+dr_age)^2, 
+               family = "binomial")
+drop1(modInt3, test = "Chisq")
 
 ## count and indicator
 modCount <- lm(claim_cost ~ claim_count + claim_ind)
 summary(modCount)
 
 # MODEL FITTING ====
-# > Split data for cross-validation ----
-control <- trainControl(method = "cv", number = 10)
-
-training <- data$claim_cost %>% 
-  createDataPartition(p = 0.8, list = FALSE)
-train <- data[training,]
-test <- data[-training,]
-rm(training)
-
 # > Predict claim_ind ----
-ind <- data %>% select(-claim_cost, -claim_count, -id)
-
 indTrain <- train %>% select(-claim_cost, -claim_count, -id)
 indTest <- test %>% select(-claim_cost, -claim_count, -id)
 
@@ -117,7 +144,6 @@ newdata <- newdata %>% mutate(
                                           ifelse(area == "E", mIndCoef[[20]],
                                                  ifelse(area == "F", mIndCoef[[21]],
                                                         NA)))))))
-
 newdata <- newdata %>% mutate(
   gender_coef = ifelse(gender == "F", 0, mIndCoef[[16]]))
 
@@ -141,14 +167,12 @@ data.frame( R2 = R2(indTest$indPred, indTest$claim_ind),
             MAE = MAE(indTest$indPred, indTest$claim_ind))
 
 # > Predict claim_count ----
-count <- data %>% select(-claim_cost, -id)
-
 countTrain <- train %>% select(-claim_cost, -id)
+countTest <- test %>% select(-claim_cost, -id)
 
 # >> Poisson regression ----
-##mCount <- train(claim_count ~., method = "glm", family = "poisson", data = count, 
-##                trControl = control)
-##print(mCount)
+##mCount <- glm(claim_count ~., family = "poisson", data = countTrain)
+##summary(mCount)
 ##
 ##predictions <- mCount %>% predict(test)
 ##data.frame( R2 = R2(predictions, test$claim_count),
@@ -163,39 +187,94 @@ summary(mCount)
 predictions <- mCount %>% predict(countTrain)
 data.frame( R2 = R2(predictions, countTrain$claim_count),
             RMSE = RMSE(predictions, countTrain$claim_count),
-            NRMSE = RMSE(predictions, countTrain$claim_count)/(max(test$claim_count)-min(test$claim_count)),
+            NRMSE = RMSE(predictions, countTrain$claim_count)/(max(countTrain$claim_count)-min(countTrain$claim_count)),
             MAE = MAE(predictions, countTrain$claim_count))
 
+predictions <- mCount %>% predict(countTest)
+data.frame( R2 = R2(predictions, countTest$claim_count),
+            RMSE = RMSE(predictions, countTest$claim_count),
+            NRMSE = RMSE(predictions, countTest$claim_count)/(max(countTest$claim_count)-min(countTest$claim_count)),
+            MAE = MAE(predictions, countTest$claim_count))
 
-predictions <- mCount %>% predict(test)
-data.frame( R2 = R2(predictions, test$claim_count),
-            RMSE = RMSE(predictions, test$claim_count),
-            NRMSE = RMSE(predictions, test$claim_count)/(max(test$claim_count)-min(test$claim_count)),
-            MAE = MAE(predictions, test$claim_count))
+# >> Tweedie model with interactions -> did not improve fit ----
+##mintCount <- cpglm(claim_count ~. 
+##                   + exposure:veh_body + veh_body:gender,
+##                   data = countTrain)
+##summary(mintCount)
+##
+##predictions <- mintCount %>% predict(countTrain)
+##data.frame( R2 = R2(predictions, countTrain$claim_count),
+##            RMSE = RMSE(predictions, countTrain$claim_count),
+##            NRMSE = RMSE(predictions, countTrain$claim_count)/(max(test$claim_count)-min(test$claim_count)),
+##            MAE = MAE(predictions, countTrain$claim_count))
+##
+##
+##predictions <- mintCount %>% predict(test)
+##data.frame( R2 = R2(predictions, test$claim_count),
+##            RMSE = RMSE(predictions, test$claim_count),
+##            NRMSE = RMSE(predictions, test$claim_count)/(max(test$claim_count)-min(test$claim_count)),
+##            MAE = MAE(predictions, test$claim_count))
 
-# > Predict claim_cost ----
+# >> Poisson mixture model ----
+mzCount <- flexmix(claim_count ~ ., model = FLXMRglm(family = "poisson"), k = 2, data = countTrain)
+summary(mzCount)
+parameters(mzCount, component = 1)
+
+predictions <- mzCount %>% predict(countTrain)
+data.frame( R2 = R2(predictions[1]$Comp.1, countTrain$claim_count),
+            RMSE = RMSE(predictions[1]$Comp.1, countTrain$claim_count),
+            NRMSE = RMSE(predictions[1]$Comp.1, countTrain$claim_count)/(max(countTrain$claim_count)-min(countTest$claim_count)),
+            MAE = MAE(predictions[1]$Comp.1, countTrain$claim_count))
+
+predictions <- mzCount %>% predict(countTest)
+data.frame( R2 = R2(predictions[1]$Comp.1, countTest$claim_count),
+            RMSE = RMSE(predictions[1]$Comp.1, countTest$claim_count),
+            NRMSE = RMSE(predictions[1]$Comp.1, countTest$claim_count)/(max(countTest$claim_count)-min(countTest$claim_count)),
+            MAE = MAE(predictions[1]$Comp.1, countTest$claim_count))
+
+# > Predict claim_cost
+costTrain <- train %>% select(-claim_ind, -id)
+costTest <- test %>% select(-claim_ind, -id)
 
 # >> Tweedie model ----
-mCost <- cpglm(claim_cost ~., link = "log", data = train)
+mCost <- cpglm(claim_cost ~., link = "log", data = costTrain)
 summary(mCost)
 
-predictions <- mCost %>% predict(train)
-data.frame( R2 = R2(predictions, train$claim_cost),
-            RMSE = RMSE(predictions, train$claim_cost),
-            NRMSE = RMSE(predictions, train$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
-            MAE = MAE(predictions, train$claim_cost))
+predictions <- mCost %>% predict(costTrain)
+data.frame( R2 = R2(predictions, costTrain$claim_cost),
+            RMSE = RMSE(predictions, costTrain$claim_cost),
+            NRMSE = RMSE(predictions, costTrain$claim_cost)/(max(costTrain$claim_cost)-min(costTrain$claim_cost)),
+            MAE = MAE(predictions, costTrain$claim_cost))
 
-predictions <- mCost %>% predict(test)
-data.frame( R2 = R2(predictions, test$claim_cost),
-            RMSE = RMSE(predictions, test$claim_cost),
-            NRMSE = RMSE(predictions, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
-            MAE = MAE(predictions, test$claim_cost))
+predictions <- mCost %>% predict(costTest)
+data.frame( R2 = R2(predictions, costTest$claim_cost),
+            RMSE = RMSE(predictions, costTest$claim_cost),
+            NRMSE = RMSE(predictions, costTest$claim_cost)/(max(costTest$claim_cost)-min(costTest$claim_cost)),
+            MAE = MAE(predictions, costTest$claim_cost))
+
+# >> Tweedie model with interactions -> slightly better AIC ----
+mintCost <- cpglm(claim_cost ~. + veh_value:dr_age + exposure:gender, 
+                  link = "log", data = costTrain)
+summary(mintCost)
+
+predictions <- mintCost %>% predict(costTrain)
+data.frame( R2 = R2(predictions, costTrain$claim_cost),
+            RMSE = RMSE(predictions, costTrain$claim_cost),
+            NRMSE = RMSE(predictions, costTrain$claim_cost)/(max(costTrain$claim_cost)-min(costTrain$claim_cost)),
+            MAE = MAE(predictions, costTrain$claim_cost))
+
+predictions <- mintCost %>% predict(costTest)
+data.frame( R2 = R2(predictions, costTest$claim_cost),
+            RMSE = RMSE(predictions, costTest$claim_cost),
+            NRMSE = RMSE(predictions, costTest$claim_cost)/(max(costTest$claim_cost)-min(costTest$claim_cost)),
+            MAE = MAE(predictions, costTest$claim_cost))
 
 # SUBMISSION ----
 # > Predict count and ind ----
 submit <- indpred(submit)
 names(submit)[names(submit) == "indPred"] <- "claim_ind"
-submit$claim_count <- mCount %>% predict(submit)
+predictions <- mzCount %>% predict(submit)
+submit$claim_count <- predictions[1]$Comp.1
 
 # > Predict cost ----
 submit$claim_cost <- mCost %>% predict(submit)

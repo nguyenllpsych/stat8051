@@ -279,13 +279,37 @@ data.frame( R2 = R2(costTest2$claim_cost, costTest$claim_cost),
             NRMSE = RMSE(costTest2$claim_cost, costTest$claim_cost)/(max(costTest$claim_cost)-min(costTest$claim_cost)),
             MAE = MAE(costTest2$claim_cost, costTest$claim_cost))
 
+# >>> logistics for ind ----
+costTest2 <- test %>% select(-claim_count, -claim_ind, -claim_cost, -id)
+
+costTest2$claim_ind <- mInd %>% predict(costTest2, type = "response")
+costTest2$claim_count <- mCount %>% predict(costTest2)
+costTest2$claim_cost <- mCost %>% predict(costTest2)
+
+data.frame( R2 = R2(costTest2$claim_ind, costTest$claim_ind),
+            RMSE = RMSE(costTest2$claim_ind, costTest$claim_ind),
+            NRMSE = RMSE(costTest2$claim_ind, costTest$claim_ind)/(max(costTest$claim_ind)-min(costTest$claim_ind)),
+            MAE = MAE(costTest2$claim_ind, costTest$claim_ind))
+
+data.frame( R2 = R2(costTest2$claim_count, costTest$claim_count),
+            RMSE = RMSE(costTest2$claim_count, costTest$claim_count),
+            NRMSE = RMSE(costTest2$claim_count, costTest$claim_count)/(max(costTest$claim_count)-min(costTest$claim_count)),
+            MAE = MAE(costTest2$claim_count, costTest$claim_count))
+
+data.frame( R2 = R2(costTest2$claim_cost, costTest$claim_cost),
+            RMSE = RMSE(costTest2$claim_cost, costTest$claim_cost),
+            NRMSE = RMSE(costTest2$claim_cost, costTest$claim_cost)/(max(costTest$claim_cost)-min(costTest$claim_cost)),
+            MAE = MAE(costTest2$claim_cost, costTest$claim_cost))
+
 # SUBMISSION ----
 # > Predict count and ind ----
 
 ## pred ind with firth no cut off 
-submit <- indpred(submit)
-names(submit)[names(submit) == "indPred"] <- "claim_ind"
+##submit <- indpred(submit)
+##names(submit)[names(submit) == "indPred"] <- "claim_ind"
 
+## pred ind with logistics
+submit$claim_ind <- mInd %>% predict(submit, type = "response")
 submit$claim_count <- mCount %>% predict(submit)
 
 # > Predict cost ----

@@ -198,6 +198,19 @@ data.frame( R2 = R2(predictions, countTest$claim_count),
             NRMSE = RMSE(predictions, countTest$claim_count)/(max(countTest$claim_count)-min(countTest$claim_count)),
             MAE = MAE(predictions, countTest$claim_count))
 
+# >> Tweedie without claim_ind ----
+countTrain <- train %>% select(-claim_cost, -claim_ind, -id)
+countTest <- test %>% select(-claim_cost, -claim_ind, -id)
+
+miCount <- cpglm(claim_count ~., link = "log", data = countTrain)
+summary(miCount)
+
+predictions <- miCount %>% predict(countTest)
+data.frame( R2 = R2(predictions, countTest$claim_count),
+            RMSE = RMSE(predictions, countTest$claim_count),
+            NRMSE = RMSE(predictions, countTest$claim_count)/(max(countTest$claim_count)-min(countTest$claim_count)),
+            MAE = MAE(predictions, countTest$claim_count))
+
 # >> Tweedie model with interactions -> did not improve fit ----
 ##mintCount <- cpglm(claim_count ~. 
 ##                   + exposure:veh_body + veh_body:gender,
@@ -301,16 +314,40 @@ data.frame( R2 = R2(costTest2$claim_cost, costTest$claim_cost),
             NRMSE = RMSE(costTest2$claim_cost, costTest$claim_cost)/(max(costTest$claim_cost)-min(costTest$claim_cost)),
             MAE = MAE(costTest2$claim_cost, costTest$claim_cost))
 
+# >>> without _ind for count ----
+costTest2 <- test %>% select(-claim_count, -claim_ind, -claim_cost, -id)
+
+costTest2 <- indpred(costTest2)
+names(costTest2)[names(costTest2) == "indPred"] <- "claim_ind"
+costTest2$claim_count <- miCount %>% predict(costTest2)
+costTest2$claim_cost <- mCost %>% predict(costTest2)
+
+data.frame( R2 = R2(costTest2$claim_ind, costTest$claim_ind),
+            RMSE = RMSE(costTest2$claim_ind, costTest$claim_ind),
+            NRMSE = RMSE(costTest2$claim_ind, costTest$claim_ind)/(max(costTest$claim_ind)-min(costTest$claim_ind)),
+            MAE = MAE(costTest2$claim_ind, costTest$claim_ind))
+
+data.frame( R2 = R2(costTest2$claim_count, costTest$claim_count),
+            RMSE = RMSE(costTest2$claim_count, costTest$claim_count),
+            NRMSE = RMSE(costTest2$claim_count, costTest$claim_count)/(max(costTest$claim_count)-min(costTest$claim_count)),
+            MAE = MAE(costTest2$claim_count, costTest$claim_count))
+
+data.frame( R2 = R2(costTest2$claim_cost, costTest$claim_cost),
+            RMSE = RMSE(costTest2$claim_cost, costTest$claim_cost),
+            NRMSE = RMSE(costTest2$claim_cost, costTest$claim_cost)/(max(costTest$claim_cost)-min(costTest$claim_cost)),
+            MAE = MAE(costTest2$claim_cost, costTest$claim_cost))
+
 # SUBMISSION ----
 # > Predict count and ind ----
 
 ## pred ind with firth no cut off 
-##submit <- indpred(submit)
-##names(submit)[names(submit) == "indPred"] <- "claim_ind"
+submit <- indpred(submit)
+names(submit)[names(submit) == "indPred"] <- "claim_ind"
 
-## pred ind with logistics
-submit$claim_ind <- mInd %>% predict(submit, type = "response")
-submit$claim_count <- mCount %>% predict(submit)
+##submit$claim_count <- mCount %>% predict(submit)
+
+## pred count without _ind 
+submit$claim_count <- miCount %>% predict(submit)
 
 # > Predict cost ----
 submit$claim_cost <- mCost %>% predict(submit)

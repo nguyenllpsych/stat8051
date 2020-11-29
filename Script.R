@@ -669,8 +669,8 @@ normalizedGini(costTest2$claim_cost, costTest$claim_cost)
 # > Predict count and ind ----
 
 ## pred ind with firth no cut off 
-##submit <- indpred(submit)
-##names(submit)[names(submit) == "indPred"] <- "claim_ind"
+submit <- indpred(submit)
+names(submit)[names(submit) == "indPred"] <- "claim_ind"
 
 ##submit$claim_count <- mCount %>% predict(submit)
 
@@ -683,6 +683,9 @@ normalizedGini(costTest2$claim_cost, costTest$claim_cost)
 ##names(submitF)[names(submitF) == "indPred"] <- "claim_ind"
 ##submitF$claim_count <- mifCount %>% predict(submitF)
 
+## pred count with tdboost without ind
+submit$claim_count <- mtd2Count %>% predict(submit, bestCount2)
+
 # > Predict cost ----
 ##submit$claim_cost <- mCost %>% predict(submit)
 ##submit <- submit %>% select(claim_cost)
@@ -692,7 +695,11 @@ normalizedGini(costTest2$claim_cost, costTest$claim_cost)
 ##submit <- submitF %>% select(claim_cost)
 
 ## pred cost without count or ind
-submit$claim_cost <- mtd3Cost %>% predict(submit, best3)
+##submit$claim_cost <- mtd3Cost %>% predict(submit, best3)
+##submit <- submit %>% select(claim_cost)
+
+## pred cost with tdboost with count and ind
+submit$claim_cost <- mtd2Cost %>% predict(submit, best2)
 submit <- submit %>% select(claim_cost)
 
 # export

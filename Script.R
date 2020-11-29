@@ -684,7 +684,7 @@ names(submit)[names(submit) == "indPred"] <- "claim_ind"
 ##submitF$claim_count <- mifCount %>% predict(submitF)
 
 ## pred count with tdboost without ind
-submit$claim_count <- mtd2Count %>% predict(submit, bestCount2)
+submit$claim_count <- mtd1Count %>% predict(submit, bestCount1)
 
 # > Predict cost ----
 ##submit$claim_cost <- mCost %>% predict(submit)

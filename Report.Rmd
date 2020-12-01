@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE, message = FAL
 ```{r meta}
 ## libraries
 library(tidyverse)
-library(apaTables)
+library(psych)
 library(caret)
 library(faraway)
 library(ggplot2)
@@ -36,7 +36,7 @@ submit <- read.csv("InsNova_test.csv")
 
 ```{r descriptives}
 data %>% select(veh_value, exposure, veh_age, dr_age, claim_ind, claim_count, claim_cost) %>% 
-  apa.cor.table()
+  psych::corr.test()
 ```
 
 # Model fitting
@@ -119,7 +119,7 @@ data.frame( R2 = R2(train$indPred, train$claim_ind),
             RMSE = RMSE(train$indPred, train$claim_ind),
             NRMSE = RMSE(train$indPred, train$claim_ind)/(max(train$claim_ind) - min(train$claim_ind)),
             MAE = MAE(train$indPred, train$claim_ind),
-            Gini = normalizedGini(train$indPred, train$claim_ind))
+            Gini = normalizedGini(train$claim_ind, train$indPred))
 
 test <- indpred(test)
 data.frame( R2 = R2(test$indPred, test$claim_ind),
@@ -142,7 +142,7 @@ data.frame( R2 = R2(predictions, train$claim_count),
             RMSE = RMSE(predictions, train$claim_count),
             NRMSE = RMSE(predictions, train$claim_count)/(max(train$claim_count)-min(train$claim_count)),
             MAE = MAE(predictions, train$claim_count),
-            Gini = normalizedGini(predictions, train$claim_count))
+            Gini = normalizedGini(train$claim_count, predictions))
 
 predictions <- mCount %>% predict(test)
 data.frame( R2 = R2(predictions, test$claim_count),
@@ -167,7 +167,7 @@ data.frame( R2 = R2(predictions, train$claim_cost),
             RMSE = RMSE(predictions, train$claim_cost),
             NRMSE = RMSE(predictions, train$claim_cost)/(max(train$claim_cost)-min(train$claim_cost)),
             MAE = MAE(predictions, train$claim_cost),
-            Gini = normalizedGini(predictions, train$claim_cost))
+            Gini = normalizedGini(train$claim_cost, predictions))
 
 predictions <- miCost %>% predict(test)
 data.frame( R2 = R2(predictions, test$claim_cost),
@@ -211,7 +211,7 @@ data.frame( R2 = R2(predictions, test$claim_cost),
             RMSE = RMSE(predictions, test$claim_cost),
             NRMSE = RMSE(predictions, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
             MAE = MAE(predictions, test$claim_cost),
-            Gini = normalizedGini(predictions, test$claim_cost))
+            Gini = normalizedGini(test$claim_cost, predictions))
 
 # performance in dataset without count and ind
 testEmpty <- data[-training,] %>% select(-claim_ind, -claim_count, -claim_cost)

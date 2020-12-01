@@ -1,0 +1,283 @@
+---
+title: "Report"
+author: "Linh Nguyen"
+date: "11/30/2020"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE)
+```
+
+# Set up
+
+```{r meta, results = FALSE}
+# META ====
+# > Libraries ----
+library(tidyverse)
+library(apaTables)
+library(caret)
+library(faraway)
+library(ggplot2)
+library(cplm) #for tweedie 
+library(logistf) #for firth
+set.seed(8051)
+options(scipen = 999)
+
+# > Data ----
+data <- read.csv("InsNova_train.csv")
+data$veh_body <- as.factor(data$veh_body)
+data$gender <- as.factor(data$gender)
+data$area <- as.factor(data$area)
+
+submit <- read.csv("InsNova_test.csv")
+```
+
+# Bivariate correlations
+
+```{r descriptives}
+data %>% select(veh_value, exposure, veh_age, dr_age, claim_ind, claim_count, claim_cost) %>% 
+  apa.cor.table()
+```
+
+# Model fitting
+
+## Split data for cross-validation
+
+```{r cv}
+training <- data$claim_cost %>% 
+  createDataPartition(p = 0.8, list = FALSE)
+train <- data[training,]
+test <- data[-training,]
+```
+
+## Function for Gini index
+
+```{r gini}
+normalizedGini <- function(aa, pp) {
+  Gini <- function(a, p) {
+    if (length(a) !=  length(p)) stop("Actual and Predicted need to be equal lengths!")
+    temp.df <- data.frame(actual = a, pred = p, range=c(1:length(a)))
+    temp.df <- temp.df[order(-temp.df$pred, temp.df$range),]
+    population.delta <- 1 / length(a)
+    total.losses <- sum(a)
+    null.losses <- rep(population.delta, length(a)) 
+    accum.losses <- temp.df$actual / total.losses 
+    gini.sum <- cumsum(accum.losses - null.losses) 
+    sum(gini.sum) / length(a)
+  }
+  Gini(aa,pp) / Gini(aa,aa)
+}
+```
+
+## Predict claim indicator `claim_ind` with Firth regression
+
+```{r ind}
+mInd <- logistf(claim_ind ~ veh_value + exposure + veh_body + veh_age + 
+                  gender + area + dr_age, 
+                data = train)
+summary(mInd)
+
+mIndCoef <- mInd$coefficients[-1]
+
+#function to compute predicted values
+indpred <- function(newdata){
+  newdata <- newdata %>% mutate(
+  veh_body_coef = ifelse(veh_body == "BUS", 0,
+                     ifelse(veh_body == "CONVT" , mIndCoef[[3]],
+                        ifelse(veh_body == "COUPE" , mIndCoef[[4]],
+                           ifelse(veh_body == "HBACK" , mIndCoef[[5]],
+                              ifelse(veh_body == "HDTOP" , mIndCoef[[6]],
+                                 ifelse(veh_body == "MCARA" , mIndCoef[[7]],
+                                    ifelse(veh_body == "MIBUS" , mIndCoef[[8]],
+                                       ifelse(veh_body == "PANVN" , mIndCoef[[9]],
+                                          ifelse(veh_body == "RDSTR" , mIndCoef[[10]],
+                                             ifelse(veh_body == "SEDAN" , mIndCoef[[11]],
+                                                ifelse(veh_body == "STNWG" , mIndCoef[[12]],
+                                                   ifelse(veh_body == "TRUCK" , mIndCoef[[13]],
+                                                      ifelse(veh_body == "UTE" , mIndCoef[[14]], 
+                                                         NA))))))))))))))
+newdata <- newdata %>% mutate(
+  area_coef = ifelse(area == "A", 0,
+                     ifelse(area == "B", mIndCoef[[17]],
+                            ifelse(area == "C", mIndCoef[[18]],
+                                   ifelse(area == "D", mIndCoef[[19]],
+                                          ifelse(area == "E", mIndCoef[[20]],
+                                                 ifelse(area == "F", mIndCoef[[21]],
+                                                        NA)))))))
+newdata <- newdata %>% mutate(
+  gender_coef = ifelse(gender == "F", 0, mIndCoef[[16]]))
+
+newdata <- newdata %>% mutate(
+  indPred = faraway::ilogit(mIndCoef[[1]] * veh_value + mIndCoef[[2]] * exposure + 
+    veh_body_coef + veh_age * mIndCoef[[15]] + gender_coef + area_coef + dr_age * mIndCoef[[22]]))
+
+newdata %>% select(-veh_body_coef, -area_coef, -gender_coef)
+} 
+
+train <- indpred(train)
+data.frame( R2 = R2(train$indPred, train$claim_ind),
+            RMSE = RMSE(train$indPred, train$claim_ind),
+            NRMSE = RMSE(train$indPred, train$claim_ind)/(max(train$claim_ind) - min(train$claim_ind)),
+            MAE = MAE(train$indPred, train$claim_ind),
+            Gini = normalizedGini(train$indPred, train$claim_ind))
+
+test <- indpred(test)
+data.frame( R2 = R2(test$indPred, test$claim_ind),
+            RMSE = RMSE(test$indPred, test$claim_ind),
+            NRMSE = RMSE(test$indPred, test$claim_ind)/(max(test$claim_ind) - min(test$claim_ind)),
+            MAE = MAE(test$indPred, test$claim_ind),
+            Gini = normalizedGini(test$claim_ind,test$indPred))
+```
+
+## Predict number of claims `claim_count` with Tweedie model
+
+```{r count}
+mCount <- cpglm(claim_count ~ veh_value + exposure + veh_body + veh_age + 
+                  gender + area + dr_age + claim_ind, 
+                link = "log", data = train)
+summary(mCount)
+
+predictions <- mCount %>% predict(train)
+data.frame( R2 = R2(predictions, train$claim_count),
+            RMSE = RMSE(predictions, train$claim_count),
+            NRMSE = RMSE(predictions, train$claim_count)/(max(train$claim_count)-min(train$claim_count)),
+            MAE = MAE(predictions, train$claim_count),
+            Gini = normalizedGini(predictions, train$claim_count))
+
+predictions <- mCount %>% predict(test)
+data.frame( R2 = R2(predictions, test$claim_count),
+            RMSE = RMSE(predictions, test$claim_count),
+            NRMSE = RMSE(predictions, test$claim_count)/(max(test$claim_count)-min(test$claim_count)),
+            MAE = MAE(predictions, test$claim_count),
+            Gini = normalizedGini(test$claim_count, predictions))
+```
+
+## Predict cost `claim_cost` with Tweedie model
+
+### Including `claim_count` and `claim_ind`
+
+```{r cost with ind}
+miCost <- cpglm(claim_cost ~ veh_value + exposure + veh_body + veh_age + 
+                  gender + area + dr_age + claim_ind + claim_count, 
+                link = "log", data = train)
+summary(miCost)
+
+predictions <- miCost %>% predict(train)
+data.frame( R2 = R2(predictions, train$claim_cost),
+            RMSE = RMSE(predictions, train$claim_cost),
+            NRMSE = RMSE(predictions, train$claim_cost)/(max(train$claim_cost)-min(train$claim_cost)),
+            MAE = MAE(predictions, train$claim_cost),
+            Gini = normalizedGini(predictions, train$claim_cost))
+
+predictions <- miCost %>% predict(test)
+data.frame( R2 = R2(predictions, test$claim_cost),
+            RMSE = RMSE(predictions, test$claim_cost),
+            NRMSE = RMSE(predictions, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
+            MAE = MAE(predictions, test$claim_cost),
+            Gini = normalizedGini(test$claim_cost, predictions))
+
+# performance in dataset without count and ind
+testEmpty <- data[-training,] %>% select(-claim_ind, -claim_count, -claim_cost)
+
+testEmpty <- indpred(testEmpty)
+names(testEmpty)[names(testEmpty) == "indPred"] <- "claim_ind"
+testEmpty$claim_count <- mCount %>% predict(testEmpty)
+testEmpty$claim_cost <- miCost %>% predict(testEmpty)
+
+data.frame( R2 = R2(testEmpty$claim_cost, test$claim_cost),
+            RMSE = RMSE(testEmpty$claim_cost, test$claim_cost),
+            NRMSE = RMSE(testEmpty$claim_cost, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
+            MAE = MAE(testEmpty$claim_cost, test$claim_cost),
+            Gini = normalizedGini(test$claim_cost, testEmpty$claim_cost))
+```
+
+### Including `claim_count` but not `claim_ind`
+
+```{r cost without ind}
+mCost <- cpglm(claim_cost ~ veh_value + exposure + veh_body + veh_age + 
+                  gender + area + dr_age + claim_count, 
+                link = "log", data = train)
+summary(mCost)
+
+predictions <- mCost %>% predict(train)
+data.frame( R2 = R2(predictions, train$claim_cost),
+            RMSE = RMSE(predictions, train$claim_cost),
+            NRMSE = RMSE(predictions, train$claim_cost)/(max(train$claim_cost)-min(train$claim_cost)),
+            MAE = MAE(predictions, train$claim_cost),
+            Gini = normalizedGini(predictions, train$claim_cost))
+
+predictions <- mCost %>% predict(test)
+data.frame( R2 = R2(predictions, test$claim_cost),
+            RMSE = RMSE(predictions, test$claim_cost),
+            NRMSE = RMSE(predictions, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
+            MAE = MAE(predictions, test$claim_cost),
+            Gini = normalizedGini(predictions, test$claim_cost))
+
+# performance in dataset without count and ind
+testEmpty <- data[-training,] %>% select(-claim_ind, -claim_count, -claim_cost)
+
+testEmpty <- indpred(testEmpty)
+names(testEmpty)[names(testEmpty) == "indPred"] <- "claim_ind"
+testEmpty$claim_count <- mCount %>% predict(testEmpty)
+testEmpty$claim_cost <- mCost %>% predict(testEmpty)
+
+data.frame( R2 = R2(testEmpty$claim_cost, test$claim_cost),
+            RMSE = RMSE(testEmpty$claim_cost, test$claim_cost),
+            NRMSE = RMSE(testEmpty$claim_cost, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
+            MAE = MAE(testEmpty$claim_cost, test$claim_cost),
+            Gini = normalizedGini(test$claim_cost, testEmpty$claim_cost))
+```
+
+### Including `id` as artificial inflation
+
+```{r cost id}
+midCost <- cpglm(claim_cost ~ veh_value + exposure + veh_body + veh_age + 
+                   gender + area + dr_age + claim_ind + claim_count + id, 
+                 link = "log", data = train)
+summary(midCost)
+
+predictions <- midCost %>% predict(train)
+data.frame( R2 = R2(predictions, train$claim_cost),
+            RMSE = RMSE(predictions, train$claim_cost),
+            NRMSE = RMSE(predictions, train$claim_cost)/(max(train$claim_cost)-min(train$claim_cost)),
+            MAE = MAE(predictions, train$claim_cost),
+            Gini = normalizedGini(predictions, train$claim_cost))
+
+predictions <- midCost %>% predict(test)
+data.frame( R2 = R2(predictions, test$claim_cost),
+            RMSE = RMSE(predictions, test$claim_cost),
+            NRMSE = RMSE(predictions, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
+            MAE = MAE(predictions, test$claim_cost),
+            Gini = normalizedGini(test$claim_cost, predictions))
+
+# performance in dataset without count and ind
+testEmpty <- data[-training,] %>% select(-claim_ind, -claim_count, -claim_cost)
+
+testEmpty <- indpred(testEmpty)
+names(testEmpty)[names(testEmpty) == "indPred"] <- "claim_ind"
+testEmpty$claim_count <- mCount %>% predict(testEmpty)
+testEmpty$claim_cost <- midCost %>% predict(testEmpty)
+
+data.frame( R2 = R2(testEmpty$claim_cost, test$claim_cost),
+            RMSE = RMSE(testEmpty$claim_cost, test$claim_cost),
+            NRMSE = RMSE(testEmpty$claim_cost, test$claim_cost)/(max(test$claim_cost)-min(test$claim_cost)),
+            MAE = MAE(testEmpty$claim_cost, test$claim_cost),
+            Gini = normalizedGini(test$claim_cost, testEmpty$claim_cost))
+```
+
+
+# Submission
+
+```{r submit}
+submit <- indpred(submit)
+names(submit)[names(submit) == "indPred"] <- "claim_ind"
+submit$claim_count <- mCount %>% predict(submit)
+submit$claim_cost <- miCost %>% predict(submit)
+
+submit$id <- 1:nrow(submit)
+submit <- submit %>% select(id, claim_cost)
+
+summary(submit$claim_cost)
+```
+

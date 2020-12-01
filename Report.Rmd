@@ -6,14 +6,13 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, error = FALSE, message = FALSE)
 ```
 
 # Set up
 
-```{r meta, results = FALSE}
-# META ====
-# > Libraries ----
+```{r meta}
+## libraries
 library(tidyverse)
 library(apaTables)
 library(caret)
@@ -24,7 +23,7 @@ library(logistf) #for firth
 set.seed(8051)
 options(scipen = 999)
 
-# > Data ----
+## data
 data <- read.csv("InsNova_train.csv")
 data$veh_body <- as.factor(data$veh_body)
 data$gender <- as.factor(data$gender)

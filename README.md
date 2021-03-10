@@ -1,5 +1,4 @@
-# STAT 8051 - Group Project
-2020 Travelers Modeling Competition - Predicting Claim Cost: Group 4  
+# 2020 Travelers Modeling Competition - Predicting Claim Cost
 
 Includes cleaning and analysis script.
 

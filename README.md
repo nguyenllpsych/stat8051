@@ -1,4 +1,4 @@
-# 2020 Travelers Modeling Competition - Predicting Claim Cost
+# Travelers Modeling Competition - Predicting Claim Cost
 
 Includes cleaning and analysis script.
 
